@@ -26,10 +26,18 @@ transformers.utils.logging.set_verbosity_error()
 from transformers import AutoProcessor, AutoModelForImageTextToText
 
 def load_model(model_name):
-    print("AI Status: Loading model into RAM (Stage 1/2)...", file=sys.stderr)
+    print("AI Status: Stage 1/2 - Initializing (Checking cache/downloading)...", file=sys.stderr)
     # Use bfloat16 for 4B version to save RAM (uses ~8GB instead of ~16GB)
-    # This is critical for 16GB systems.
     token = os.environ.get("HF_TOKEN")
+    
+    # We load the processor first as it's small and confirms the model ID/token is correct
+    try:
+        processor = AutoProcessor.from_pretrained(model_name, token=token)
+        print("AI Status: Stage 1/2 - Processor ready. Loading weights (this may take 2-5 mins)...", file=sys.stderr)
+    except Exception as e:
+        print(f"AI Status: Error loading processor: {str(e)}", file=sys.stderr)
+        raise e
+
     model = AutoModelForImageTextToText.from_pretrained(
         model_name,
         quantization_config=None,
@@ -39,7 +47,7 @@ def load_model(model_name):
         trust_remote_code=True,
         token=token
     )
-    processor = AutoProcessor.from_pretrained(model_name, token=token)
+    print("AI Status: Stage 1/2 - Weights loaded. Ready for generation.", file=sys.stderr)
     return model, processor
 
 def run_worker():
