@@ -373,8 +373,12 @@ class MedGemmaReportGenerator(ReportGenerator):
             while True:
                 line = process.stderr.readline()
                 if line:
+                    # Show all output to the user for transparency (progress bars, etc.)
+                    print(f"Worker Output: {line.strip()}", file=sys.stderr) 
                     if "AI Status:" in line:
                         status_container.info(line.strip())
+                    elif "%|" in line or "it/s" in line: # Detect progress bars
+                        status_container.text(line.strip())
                 
                 if process.poll() is not None:
                     break

@@ -54,14 +54,33 @@ def load_model(model_name):
         print(f"AI Status: Error loading processor: {str(e)}", file=sys.stderr)
         raise e
 
+    # Create offload directory
+    offload_dir = os.path.join(os.getcwd(), "offload_medgemma")
+    os.makedirs(offload_dir, exist_ok=True)
+
+    # GPU Optimization: Use 4-bit quantization if GPU is available
+    bnb_config = None
+    if torch.cuda.is_available():
+        from transformers import BitsAndBytesConfig
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True
+        )
+        print("AI Status: Stage 1/2 - GPU detected! Using 4-bit acceleration.", file=sys.stderr)
+    else:
+        print("AI Status: Stage 1/2 - No GPU. Running on CPU (Disk Offloading enabled).", file=sys.stderr)
+
     model = AutoModelForImageTextToText.from_pretrained(
         model_name,
-        quantization_config=None,
-        device_map="cpu", 
-        torch_dtype=torch.bfloat16, 
+        quantization_config=bnb_config,
+        device_map="auto", 
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.bfloat16, 
         low_cpu_mem_usage=True,
         trust_remote_code=True,
-        token=token
+        token=token,
+        offload_folder=offload_dir
     )
     print("AI Status: Stage 1/2 - Weights loaded. Ready for generation.", file=sys.stderr)
     return model, processor
@@ -72,7 +91,7 @@ def run_worker():
         
     try:
         request = json.loads(line)
-        model_name = request.get("model_name", "google/medgemma-2b-it")
+        model_name = request.get("model_name", "google/medgemma-1.5-4b-it")
         image_path = request.get("image_path")
         prompt_text = request.get("prompt", "Describe this chest X-ray in detail for a clinical report.")
         
