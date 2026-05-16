@@ -20,13 +20,28 @@ import gc
 import warnings
 from PIL import Image
 
+import psutil
+import threading
+import time
+
+def monitor_ram():
+    while True:
+        mem = psutil.virtual_memory()
+        print(f"AI Status: RAM Usage: {mem.percent}% ({mem.used / 1024**3:.1f}GB / {mem.total / 1024**3:.1f}GB)", file=sys.stderr)
+        time.sleep(10)
+
 # Total Silence Mode
 warnings.filterwarnings('ignore')
 import transformers
 # transformers.utils.logging.set_verbosity_info()
+
 from transformers import AutoProcessor, AutoModelForImageTextToText
 
 def load_model(model_name):
+    # Start RAM monitor in background
+    monitor_thread = threading.Thread(target=monitor_ram, daemon=True)
+    monitor_thread.start()
+    
     print("AI Status: Stage 1/2 - Initializing (Checking cache/downloading)...", file=sys.stderr)
     # Use bfloat16 for 4B version to save RAM (uses ~8GB instead of ~16GB)
     token = os.environ.get("HF_TOKEN")
