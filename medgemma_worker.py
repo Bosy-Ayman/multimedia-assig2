@@ -6,6 +6,12 @@ os.environ["TQDM_DISABLE"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 # The token should be inherited from the parent process or loaded from environment
+if not os.environ.get("HF_TOKEN"):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
 import torch
 import json
@@ -21,18 +27,19 @@ from transformers import AutoProcessor, AutoModelForImageTextToText
 
 def load_model(model_name):
     print("AI Status: Loading model into RAM (Stage 1/2)...", file=sys.stderr)
-    # Use float32 for 2B version: It is 100% stable on all CPUs
-    # 2B in float32 uses ~8GB RAM, which fits perfectly in 16GB systems.
+    # Use bfloat16 for 4B version to save RAM (uses ~8GB instead of ~16GB)
+    # This is critical for 16GB systems.
+    token = os.environ.get("HF_TOKEN")
     model = AutoModelForImageTextToText.from_pretrained(
         model_name,
         quantization_config=None,
         device_map="cpu", 
-        torch_dtype=torch.float32, 
+        torch_dtype=torch.bfloat16, 
         low_cpu_mem_usage=True,
         trust_remote_code=True,
-        token=os.environ["HF_TOKEN"]
+        token=token
     )
-    processor = AutoProcessor.from_pretrained(model_name, token=os.environ["HF_TOKEN"])
+    processor = AutoProcessor.from_pretrained(model_name, token=token)
     return model, processor
 
 def run_worker():

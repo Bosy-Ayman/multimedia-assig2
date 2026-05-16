@@ -334,7 +334,7 @@ Image quality is adequate for diagnostic purposes.
 No acute findings. Follow-up as clinically indicated."""
 
 class MedGemmaReportGenerator(ReportGenerator):
-    def __init__(self, model_name: str = "google/medgemma-2b-it"):
+    def __init__(self, model_name: str = "google/medgemma-1.5-4b-it"):
         self.model_name = model_name
         self.available = True
         self.worker_script = str(Path(__file__).parent / "medgemma_worker.py")
@@ -346,12 +346,20 @@ class MedGemmaReportGenerator(ReportGenerator):
             python_exe = sys.executable
             payload["model_name"] = self.model_name
             
+            # Prepare environment for worker
+            env = os.environ.copy()
+            if not env.get("HF_TOKEN"):
+                from dotenv import load_dotenv
+                load_dotenv()
+                env["HF_TOKEN"] = os.getenv("HF_TOKEN")
+
             process = subprocess.Popen(
                 [python_exe, "medgemma_worker.py"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=env
             )
             
             # Send payload

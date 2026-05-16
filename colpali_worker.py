@@ -14,6 +14,12 @@ os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # The token should be inherited from the parent process or loaded from environment
+if not os.environ.get("HF_TOKEN"):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
 import json
 import gc
