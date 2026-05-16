@@ -28,11 +28,12 @@ pip install -r requirements.txt
 pip install colpali-engine
 ```
 
-### 3. HuggingFace Login
-Since `MedGemma` is a gated model, you must have access to it via HuggingFace and be authenticated:
+### 3. Authentication & Secrets
+Since `MedGemma` and `ColPali` are gated models, you must provide a HuggingFace token. Create a `.env` file in the root directory:
 ```bash
-huggingface-cli login
+HF_TOKEN=your_huggingface_token_here
 ```
+The application will automatically load this token to authenticate with the HuggingFace Hub.
 
 ### 4. Data Preparation
 To populate the local knowledge base with sample data (dummy X-ray images and synthetic QA pairs), run:
