@@ -1,0 +1,39 @@
+# requirements.txt - Install with: pip install -r requirements.txt
+
+# Core ML & Deep Learning
+torch>=2.6.0
+torchvision>=0.17.0
+transformers>=4.40.0
+accelerate==0.24.0
+colpali-engine
+
+# Image Processing
+Pillow>=10.0.0
+opencv-python>=4.8.1
+
+# Data Science
+numpy>=1.24.3
+pandas>=2.0.3
+scikit-learn>=1.3.0
+
+# Web Interface
+python-dotenv
+streamlit>=1.28.0
+
+# Utilities
+tqdm>=4.66.1
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Optional: GPU acceleration (uncomment if using GPU)
+# tensorflow==2.13.0
+
+# Optional: Better progress bars
+# rich==13.5.2
+
+# Development (optional)
+# jupyter==1.0.0
+# ipython==8.15.0
+# pytest==7.4.0
+# black==23.10.0
+# flake8==6.1.0
