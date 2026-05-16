@@ -2,9 +2,10 @@ import os
 import sys
 
 # MASTER SILENCE
-os.environ["TQDM_DISABLE"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+# ENABLE PROGRESS FOR USER
+os.environ["TQDM_DISABLE"] = "0"
+os.environ["TRANSFORMERS_VERBOSITY"] = "info"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
 # The token should be inherited from the parent process or loaded from environment
 if not os.environ.get("HF_TOKEN"):
     try:
@@ -22,7 +23,7 @@ from PIL import Image
 # Total Silence Mode
 warnings.filterwarnings('ignore')
 import transformers
-transformers.utils.logging.set_verbosity_error()
+# transformers.utils.logging.set_verbosity_info()
 from transformers import AutoProcessor, AutoModelForImageTextToText
 
 def load_model(model_name):

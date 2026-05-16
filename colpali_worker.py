@@ -9,9 +9,10 @@ import os
 import sys
 
 # MASTER SILENCE: Disable all progress bars to prevent subprocess deadlocks
-os.environ["TQDM_DISABLE"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+# ENABLE PROGRESS FOR USER
+os.environ["TQDM_DISABLE"] = "0"
+os.environ["TRANSFORMERS_VERBOSITY"] = "info"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # The token should be inherited from the parent process or loaded from environment
 if not os.environ.get("HF_TOKEN"):
