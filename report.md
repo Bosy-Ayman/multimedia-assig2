@@ -44,6 +44,31 @@ A direct comparison module within the application evaluates the retrieval compon
   1. **Subprocess Isolation:** Models were isolated into dedicated worker processes (`medgemma_worker.py`, `colpali_worker.py`) that spin up and completely release VRAM back to the OS upon exiting.
   2. **Aggressive Quantization:** Both models run in **4-bit NF4 quantization**, compressing 6GB models down to ~2.5GB.
   3. **SDPA (Scaled Dot-Product Attention):** For ColPali, processing 1,000+ high-res image patches typically requires ~3GB of activation VRAM. By switching from `eager` attention to `sdpa` (Flash Attention), we drastically reduced the memory spike, allowing ColPali to successfully run on the 6GB GPU in under 30 seconds (down from 15 minutes on CPU).
+ 
+### Report Generation Flow
+```text
+Chest X-Ray Image
+        ↓
+MedGemma Vision Encoder
+        ↓
+Medical Language Generation
+        ↓
+Structured Clinical Report
 
 ## 5. End-to-End System Integration
+
+## Rag flow
+Query X-Ray + Clinical Question
+                ↓
+Image Embedding (CLIP / ColPali)
+                ↓
+Similarity Search in Knowledge Base
+                ↓
+Retrieve Top-K Similar Cases
+                ↓
+Build Context
+                ↓
+MedGemma Generation
+                ↓
+Grounded Clinical Answer
 The system successfully integrates image processing, dual-embedding retrieval, and large multimodal model generation. The modular design ensures that the retrieval backend (CLIP vs ColPali) and the generation backend (MedGemma vs Template) can be hot-swapped dynamically via the Streamlit sidebar, effectively balancing high-end medical AI capabilities with strict local hardware constraints.
