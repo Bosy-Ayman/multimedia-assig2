@@ -244,7 +244,7 @@ class ColPaliRetriever:
                 input=json.dumps(request),
                 capture_output=True,
                 text=True,
-                timeout=600  # 10 min max (model is huge)
+                timeout=None  # No timeout, model is huge and takes >10 min to load on slow disks
             )
             # Always show stderr (model loading progress)
             if result.stderr:
@@ -354,7 +354,7 @@ class MedGemmaReportGenerator(ReportGenerator):
                 env["HF_TOKEN"] = os.getenv("HF_TOKEN")
 
             process = subprocess.Popen(
-                [python_exe, "medgemma_worker.py"],
+                [python_exe, self.worker_script],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -396,7 +396,7 @@ class MedGemmaReportGenerator(ReportGenerator):
             return {"status": "error", "message": str(e)}
 
     def generate(self, image: Image) -> str:
-        tmp_path = Path("data/tmp_medgemma_img.jpg")
+        tmp_path = Path("data/tmp_ai_img.jpg")
         tmp_path.parent.mkdir(exist_ok=True)
         image.save(str(tmp_path))
         
@@ -410,11 +410,17 @@ class MedGemmaReportGenerator(ReportGenerator):
         else:
             err = res.get("message", "Unknown worker error")
             print(f"CRITICAL: MedGemma Worker Error: {err}")
-            st.error(f"AI Worker Error: {err}")
+            if "os error 1455" in str(err).lower():
+                st.error("🚨 CRITICAL OS MEMORY ERROR 🚨")
+                st.error("Your Windows Page File is too small or your RAM is too fragmented to load this massive 4-Billion parameter model.")
+                st.error("**YOU MUST RESTART YOUR COMPUTER NOW.**")
+                st.info("Since you already increased your page file to 20,000 MB, a simple PC reboot will flush the memory fragmentation and allow the model to load successfully.")
+            else:
+                st.error(f"AI Worker Error: {err}")
             return ReportGenerator.template_report()
 
     def generate_qa(self, image: Image, question: str, context: str) -> str:
-        tmp_path = Path("data/tmp_medgemma_img.jpg")
+        tmp_path = Path("data/tmp_ai_img.jpg")
         tmp_path.parent.mkdir(exist_ok=True)
         image.save(str(tmp_path))
         
@@ -514,11 +520,11 @@ class KnowledgeBase:
 # QA SYSTEM (RAG)
 # ============================================================================
 class QASystem:
-    def __init__(self, clip, colpali, kb, medgemma=None):
+    def __init__(self, clip, colpali, kb, ai_model=None):
         self.clip = clip
         self.colpali = colpali
         self.kb = kb
-        self.medgemma = medgemma
+        self.ai_model = ai_model
 
     def answer_question(self, image: Image, question: str,
                        model: str = "clip", top_k: int = 3) -> Dict:
@@ -543,12 +549,21 @@ class QASystem:
         # Build context
         context = f"Based on {len(similar_cases)} similar clinical cases:\n\n"
         for i, case in enumerate(similar_cases, 1):
-            context += f"Case {i}: Impression: {case['impression']}\n"
-            context += f"Excerpt: {case['report'][:300]}...\n\n"
+            context += f"Case {i}: Impression: {case['impression']}\n\n"
 
-        # Generate answer using MedGemma if available, otherwise fallback
-        if self.medgemma and self.medgemma.available:
-            answer = self._generate_answer_medgemma(image, question, context)
+        # Free VRAM to prevent MedGemma OOM crash (6GB limit)
+        if hasattr(self.clip, '_model'):
+            self.clip._model = None
+            self.clip._processor = None
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        # Generate answer using AI model if available, otherwise fallback
+        if self.ai_model and self.ai_model.available:
+            answer = self._generate_answer_ai(image, question, context)
         else:
             answer = self._generate_answer(question, similar_cases)
         
@@ -564,22 +579,14 @@ class QASystem:
             "retrieval_model": model,
             "num_sources": len(similar_cases),
             "retrieval_time_ms": elapsed * 1000,
-            "used_medgemma": self.medgemma.available if self.medgemma else False
+            "used_ai": self.ai_model.available if self.ai_model else False
         }
 
-    def _generate_answer_medgemma(self, image: Image, question: str, context: str) -> str:
-        prompt = (
-            f"You are a medical AI assistant. Answer the user's clinical question based on the provided X-ray image "
-            f"and the following similar retrieved cases.\n\n"
-            f"Context from similar cases:\n{context}\n\n"
-            f"User Question: {question}\n\n"
-            f"Detailed Clinical Answer:"
-        )
-    def _generate_answer_medgemma(self, image: Image, question: str, context: str) -> str:
+    def _generate_answer_ai(self, image: Image, question: str, context: str) -> str:
         try:
-            return self.medgemma.generate_qa(image, question, context)
+            return self.ai_model.generate_qa(image, question, context)
         except Exception as e:
-            return f"Error using Model for QA: {e}. Fallback to template."
+            return f"Error using AI Model for QA: {e}. Fallback to template."
 
     def _generate_answer(self, question: str, cases: List[Dict]) -> str:
         analysis = f"Analysis based on {len(cases)} similar cases:\n\n"
@@ -664,9 +671,15 @@ def main():
                 st.image(image, caption="Uploaded CXR", use_container_width=True)
         with col2:
             if uploaded:
-                use_med = st.checkbox("Use MedGemma (if available)", value=True)
+                use_med = st.checkbox("Use MedGemma 1.5-4b-it (GPU Accelerated)", value=True)
                 if st.button("Generate Report"):
-                    with st.spinner("Loading AI and generating report..."):
+                    with st.spinner("Freeing system RAM for MedGemma and generating report..."):
+                        # Aggressively clear Streamlit cache to free up RAM from CLIP/ColPali
+                        # This prevents Windows OS Error 1455 (Page file too small)
+                        st.cache_resource.clear()
+                        import gc
+                        gc.collect()
+                        
                         mg = get_medgemma()
                         if use_med and mg.available:
                             report = mg.generate(image)
@@ -674,7 +687,7 @@ def main():
                             if report.strip().startswith("# Chest X-Ray Medical Report"):
                                 st.warning("AI Generation failed. Using template. Check terminal for details.")
                             else:
-                                st.success("Report generated with PaliGemma/MedGemma")
+                                st.success("Report generated with MedGemma 1.5-4b-it")
                         else:
                             report = ReportGenerator.template_report()
                             st.info("Using medical template (AI disabled)")
@@ -709,8 +722,8 @@ def main():
                     qa_system = QASystem(clip_m, col_m, kb, med_m)
                     res = qa_system.answer_question(image, question, model=retrieval_model.lower(), top_k=top_k)
                 
-                if res.get("used_medgemma"):
-                    st.success("Answer generated using PaliGemma/MedGemma (RAG)!")
+                if res.get("used_ai"):
+                    st.success("Answer generated using MedGemma 1.5-4b-it (RAG)!")
                 else:
                     st.success("Answer generated! (Template Fallback)")
                 st.write(res["answer"])
@@ -754,6 +767,21 @@ def main():
             if res.get("ColPali"):
                 ratio = res['ColPali']['time_ms'] / res['CLIP']['time_ms']
                 st.write(f"ColPali is **{ratio:.1f}x slower**. Similarity diff: {abs(res['CLIP']['similarity'] - res['ColPali']['similarity']):.3f}")
+                
+                st.markdown("### 📈 Visual Comparison")
+                chart_data = pd.DataFrame({
+                    "Model": ["CLIP", "ColPali"],
+                    "Time (ms)": [res['CLIP']['time_ms'], res['ColPali']['time_ms']],
+                    "Similarity": [res['CLIP']['similarity'], res['ColPali']['similarity']]
+                }).set_index("Model")
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Inference Time (ms) - Lower is Better**")
+                    st.bar_chart(chart_data[["Time (ms)"]], color="#ff4b4b")
+                with c2:
+                    st.markdown("**Similarity Score - Higher is Better**")
+                    st.bar_chart(chart_data[["Similarity"]], color="#00ff00")
 
     elif mode == "Knowledge Base":
         st.header("📚 Knowledge Base Management")
@@ -782,6 +810,18 @@ def main():
             st.write("Generate embeddings for all records to enable retrieval.")
             idx_model = st.selectbox("Model to use for indexing", ["CLIP", "ColPali"])
             if st.button("Index All Records"):
+                if idx_model == "ColPali":
+                    # Free VRAM to give ColPali enough memory to process patches
+                    clip_m = get_clip()
+                    if hasattr(clip_m, '_model'):
+                        clip_m._model = None
+                        clip_m._processor = None
+                    import gc
+                    import torch
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                
                 with st.spinner(f"Indexing with {idx_model}..."):
                     if idx_model == "CLIP":
                         model = get_clip()

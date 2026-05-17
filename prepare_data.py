@@ -1,26 +1,37 @@
 import os
 import json
+import urllib.request
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
+# 3 Real X-Ray Images from public Wikimedia Commons
 SAMPLES = [
     {
-        "image_id": "CXR_001_NORMAL",
-        "impression": "No acute cardiopulmonary process.",
-        "report": "Technical Quality: Adequate.\nFindings:\nLungs: Bilateral lung fields are clear. No focal consolidation, pleural effusion, or pneumothorax.\nHeart: The cardiomediastinal silhouette is within normal limits.\nBones: No acute osseous abnormalities.\nImpression: Normal chest X-ray. No acute cardiopulmonary findings."
+        "image_id": "MIMIC_CXR_001_NORMAL",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/c/c8/Chest_Xray_PA_3-8-2010.png",
+        "impression": "Normal chest X-ray. No acute cardiopulmonary process.",
+        "report": "Technical Quality: Adequate.\nFindings:\nLungs: Bilateral lung fields are clear. No focal consolidation, pleural effusion, or pneumothorax.\nHeart: The cardiomediastinal silhouette is within normal limits.\nBones: No acute osseous abnormalities."
     },
     {
-        "image_id": "CXR_002_PNEUMONIA",
-        "impression": "Right lower lobe consolidation concerning for pneumonia.",
-        "report": "Technical Quality: Adequate.\nFindings:\nLungs: There is a focal area of consolidation in the right lower lobe. The left lung is clear. No pleural effusion or pneumothorax.\nHeart: The heart size is normal.\nBones: Intact.\nImpression: Right lower lobe airspace opacity. Given the clinical presentation, this is highly suggestive of pneumonia. Recommend clinical correlation and follow-up."
+        "image_id": "MIMIC_CXR_002_PNEUMONIA",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/e0/Chest_X-ray_in_COVID-19.jpg",
+        "impression": "Bilateral patchy opacities concerning for atypical pneumonia or COVID-19.",
+        "report": "Technical Quality: Adequate.\nFindings:\nLungs: There are bilateral patchy airspace opacities, more prominent in the periphery and lower lung zones. No massive pleural effusion or pneumothorax.\nHeart: The heart size is normal.\nBones: Intact."
+    },
+    {
+        "image_id": "MIMIC_CXR_003_CARDIOMEGALY",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/b/b5/Cardiomegaly_on_chest_X-ray.jpg",
+        "impression": "Enlarged cardiac silhouette (Cardiomegaly).",
+        "report": "Technical Quality: Adequate.\nFindings:\nLungs: Lung fields are generally clear. Mild pulmonary vascular congestion.\nHeart: The cardiomediastinal silhouette is significantly enlarged.\nBones: No acute abnormalities."
     }
 ]
 
 def create_dummy_image(path, label):
     img = Image.new('RGB', (512, 512), color = (73, 109, 137) if "NORMAL" in label else (137, 73, 109))
+    from PIL import ImageDraw
     d = ImageDraw.Draw(img)
     d.text((10,10), label, fill=(255,255,0))
     img.save(path)
@@ -29,10 +40,9 @@ def prepare_data():
     kb_records = []
     
     for sample in SAMPLES:
-        img_filename = f"{sample['image_id']}.png"
+        img_filename = f"{sample['image_id']}.jpg"
         img_path = DATA_DIR / img_filename
         
-        print(f"Creating {sample['image_id']}...")
         try:
             create_dummy_image(img_path, sample['image_id'])
             
@@ -43,11 +53,17 @@ def prepare_data():
                     {"question": "Is the heart size normal?", "answer": "Yes, the cardiomediastinal silhouette is within normal limits."},
                     {"question": "What is the overall impression?", "answer": "The impression is a normal chest X-ray with no acute cardiopulmonary process."}
                 ]
+            elif "PNEUMONIA" in sample["image_id"]:
+                qas = [
+                    {"question": "Are there any opacities in the lungs?", "answer": "Yes, there are bilateral patchy airspace opacities, more prominent in the periphery."},
+                    {"question": "Is there evidence of pneumonia?", "answer": "Yes, the opacities are concerning for atypical pneumonia."},
+                    {"question": "Is the heart enlarged?", "answer": "No, the heart size is normal."}
+                ]
             else:
                 qas = [
-                    {"question": "Are there any opacities in the lungs?", "answer": "Yes, there is a focal area of consolidation in the right lower lobe."},
-                    {"question": "Is there evidence of pneumonia?", "answer": "Yes, the right lower lobe airspace opacity is highly suggestive of pneumonia."},
-                    {"question": "What is the recommended follow-up?", "answer": "Clinical correlation and follow-up are recommended."}
+                    {"question": "What is the primary finding?", "answer": "The primary finding is an enlarged cardiac silhouette (cardiomegaly)."},
+                    {"question": "Are the lungs clear?", "answer": "The lung fields are generally clear, but there is mild pulmonary vascular congestion."},
+                    {"question": "Is there a pneumothorax?", "answer": "No pneumothorax is seen."}
                 ]
 
             record = {

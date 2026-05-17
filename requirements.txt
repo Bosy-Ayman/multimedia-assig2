@@ -6,6 +6,9 @@ torchvision>=0.17.0
 transformers>=4.40.0
 accelerate==0.24.0
 colpali-engine
+sentencepiece
+tiktoken
+timm
 
 # Image Processing
 Pillow>=10.0.0

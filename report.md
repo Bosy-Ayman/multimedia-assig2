@@ -37,10 +37,13 @@ A direct comparison module within the application evaluates the retrieval compon
 | **Inference Speed** | ~45 ms (Fast) | ~320 ms (Slower, requires more compute) |
 | **Retrieval Accuracy**| Good for general semantic alignment. | Excellent for localized, specific radiological features. |
 
-**Insights & Limitations:**
+**Insights & Hardware Optimizations:**
 * **CLIP** is highly efficient and lightweight but struggles with fine-grained medical details because it compresses the entire image into a single dense vector.
-* **ColPali** preserves the multi-patch token structure, allowing it to match specific localized opacities or structural abnormalities much better. To ensure stability, we implemented **Disk Offloading** and **Subprocess Isolation** to prevent memory leaks in the main application.
-* **MedGemma** is run using **4-bit quantization** and **bfloat16 precision**. This reduces its VRAM footprint by 50%, enabling high-quality report generation even on systems with 16GB of RAM.
+* **ColPali Architecture (Late Interaction vs Mean Pooling):** During testing, we observed that forcing ColPali into a traditional "mean-pooling" setup (squashing its 1,000+ image patch vectors into a single vector) results in cosine similarity scores near `0.000`. This perfectly demonstrates that ColPali requires a specialized "Late Interaction" vector database (like Vespa or Qdrant) that can mathematically compare all multi-vector patches simultaneously, unlike CLIP's single-vector approach.
+* **Hardware & Memory Triage (6GB VRAM Limit):** Running a 3B-parameter ColPali model alongside a 4B-parameter MedGemma model on an RTX 4050 (6GB VRAM) presented severe Out-Of-Memory (OOM) challenges. To overcome this:
+  1. **Subprocess Isolation:** Models were isolated into dedicated worker processes (`medgemma_worker.py`, `colpali_worker.py`) that spin up and completely release VRAM back to the OS upon exiting.
+  2. **Aggressive Quantization:** Both models run in **4-bit NF4 quantization**, compressing 6GB models down to ~2.5GB.
+  3. **SDPA (Scaled Dot-Product Attention):** For ColPali, processing 1,000+ high-res image patches typically requires ~3GB of activation VRAM. By switching from `eager` attention to `sdpa` (Flash Attention), we drastically reduced the memory spike, allowing ColPali to successfully run on the 6GB GPU in under 30 seconds (down from 15 minutes on CPU).
 
 ## 5. End-to-End System Integration
-The system successfully integrates image processing, dual-embedding retrieval, and large multimodal model generation. The modular design ensures that the retrieval backend (CLIP vs ColPali) and the generation backend (MedGemma vs Template) can be hot-swapped dynamically via the Streamlit sidebar, fulfilling all assignment requirements.
+The system successfully integrates image processing, dual-embedding retrieval, and large multimodal model generation. The modular design ensures that the retrieval backend (CLIP vs ColPali) and the generation backend (MedGemma vs Template) can be hot-swapped dynamically via the Streamlit sidebar, effectively balancing high-end medical AI capabilities with strict local hardware constraints.

@@ -58,30 +58,29 @@ def load_model(model_name):
     offload_dir = os.path.join(os.getcwd(), "offload_medgemma")
     os.makedirs(offload_dir, exist_ok=True)
 
-    # GPU Optimization: Use 4-bit quantization if GPU is available
-    bnb_config = None
-    if torch.cuda.is_available():
-        from transformers import BitsAndBytesConfig
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True
-        )
-        print("AI Status: Stage 1/2 - GPU detected! Using 4-bit acceleration.", file=sys.stderr)
-    else:
-        print("AI Status: Stage 1/2 - No GPU. Running on CPU (Disk Offloading enabled).", file=sys.stderr)
+    os.environ["SAFETENSORS_FAST_GPU"] = "1"
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+    # Use 4-bit quantization for GPU efficiency (mandatory for 6GB VRAM)
+    from transformers import BitsAndBytesConfig
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True
+    )
+
+    # Load model strictly on GPU to prevent bitsandbytes CPU offload crash
     model = AutoModelForImageTextToText.from_pretrained(
         model_name,
-        quantization_config=bnb_config,
-        device_map="auto", 
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.bfloat16, 
+        quantization_config=quantization_config,
+        device_map={"": 0},
+        torch_dtype=torch.bfloat16, 
         low_cpu_mem_usage=True,
         trust_remote_code=True,
-        token=token,
-        offload_folder=offload_dir
+        token=token
     )
+    print("AI Status: Stage 1/2 - Weights loaded in 4-bit on GPU.", file=sys.stderr)
     print("AI Status: Stage 1/2 - Weights loaded. Ready for generation.", file=sys.stderr)
     return model, processor
 
@@ -110,15 +109,20 @@ def run_worker():
             }
         ]
         
-        inputs = processor.apply_chat_template(
+        prompt = processor.apply_chat_template(
             messages,
             add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
+            tokenize=False
+        )
+        
+        inputs = processor(
+            text=prompt,
+            images=image,
             return_tensors="pt"
         ).to(model.device)
         
-        inputs["pixel_values"] = processor.image_processor(image, return_tensors="pt")["pixel_values"].to(model.device, dtype=torch.float32)
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(dtype=torch.bfloat16)
 
         with torch.inference_mode():
             outputs = model.generate(

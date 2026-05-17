@@ -8,6 +8,14 @@ Windows paging-file errors (OS error 1455).
 import os
 import sys
 
+# ============================================================================
+# ENVIRONMENT FIX: FORCE VIRTUAL ENVIRONMENT PRIORITY
+# ============================================================================
+_project_root = os.path.dirname(os.path.abspath(__file__))
+_venv_site = os.path.join(_project_root, "venv", "Lib", "site-packages")
+if os.path.exists(_venv_site) and _venv_site not in sys.path:
+    sys.path.insert(0, _venv_site)
+
 # MASTER SILENCE: Disable all progress bars to prevent subprocess deadlocks
 # ENABLE PROGRESS FOR USER
 os.environ["TQDM_DISABLE"] = "0"
@@ -59,14 +67,6 @@ def extract_embeddings(outputs):
     return outputs
 
 def main():
-    # FORCE VIRTUAL ENVIRONMENT PRIORITY for the worker subprocess
-    import sys
-    import os
-    _project_root = os.path.dirname(os.path.abspath(__file__))
-    _venv_site = os.path.join(_project_root, "venv", "Lib", "site-packages")
-    if os.path.exists(_venv_site) and _venv_site not in sys.path:
-        sys.path.insert(0, _venv_site)
-
     request = json.loads(sys.stdin.read())
     action = request["action"]
 
@@ -95,10 +95,9 @@ def main():
         offload_path.mkdir(parents=True, exist_ok=True)
 
         print("Loading model (low-mem / disk offload)...", file=sys.stderr)
-        gc.collect()
-        
-        # Use bfloat16 to save 50% RAM compared to float32
-        # ~6GB instead of ~12GB for ColPali v1.2
+        # We CAN use the GPU if we aggressively compress both the model and the math!
+        # 1. 4-bit quantization shrinks the model from 6GB to 2.5GB.
+        # 2. SDPA (Scaled Dot Product Attention) prevents the 3GB activation memory spike.
         from transformers import BitsAndBytesConfig
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -110,11 +109,10 @@ def main():
         model = ModelClass.from_pretrained(
             "vidore/colpali-v1.2",
             quantization_config=bnb_config,
-            device_map="auto",
-            offload_folder=OFFLOAD_DIR,
-            torch_dtype=torch.float16,
+            device_map={"": 0}, # Force full GPU
             low_cpu_mem_usage=True,
-            attn_implementation="eager",
+            attn_implementation="sdpa", # CRITICAL: Cuts memory during image processing!
+            offload_folder=OFFLOAD_DIR,
             trust_remote_code=True
         )
         model.eval()
@@ -143,34 +141,32 @@ def main():
         
         print(f"Final vocab size: {model.get_input_embeddings().weight.shape[0]}", file=sys.stderr)
 
+        def prepare_inputs(inputs, model):
+            inputs.pop("labels", None)
+            for k, v in inputs.items():
+                if isinstance(v, torch.Tensor):
+                    if v.dtype in [torch.int32, torch.int16]:
+                        inputs[k] = v.long()
+                    elif v.is_floating_point() and k == "pixel_values":
+                        inputs[k] = v.to(model.dtype)
+            return inputs
+
         if action == "embed_image":
             image = Image.open(request["image_path"]).convert("RGB")
-            inputs = processor.process_images([image]).to(model.device)
-            if "pixel_values" in inputs:
-                inputs["pixel_values"] = inputs["pixel_values"].to(model.dtype)
+            inputs = prepare_inputs(processor.process_images([image]).to(model.device), model)
             
             with torch.inference_mode():
-                outputs = model(
-                    input_ids=inputs.get("input_ids"),
-                    pixel_values=inputs.get("pixel_values"),
-                    attention_mask=inputs.get("attention_mask")
-                )
+                outputs = model(**inputs)
             emb = extract_embeddings(outputs)
             result = mean_pool(emb).tolist()
             del emb, inputs, outputs; gc.collect()
             print(json.dumps({"status": "ok", "embedding": result}))
 
         elif action == "embed_text":
-            inputs = processor.process_queries([request["text"]]).to(model.device)
-            if "input_ids" in inputs:
-                inputs["input_ids"] = inputs["input_ids"].long()
+            inputs = prepare_inputs(processor.process_queries([request["text"]]).to(model.device), model)
                 
             with torch.inference_mode():
-                outputs = model(
-                    input_ids=inputs.get("input_ids"),
-                    pixel_values=inputs.get("pixel_values"),
-                    attention_mask=inputs.get("attention_mask")
-                )
+                outputs = model(**inputs)
             emb = extract_embeddings(outputs)
             result = mean_pool(emb).tolist()
             del emb, inputs, outputs; gc.collect()
@@ -180,31 +176,19 @@ def main():
             image = Image.open(request["image_path"]).convert("RGB")
             text = request["text"]
 
-            img_inputs = processor.process_images([image]).to(model.device)
-            if "pixel_values" in img_inputs:
-                img_inputs["pixel_values"] = img_inputs["pixel_values"].to(model.dtype)
+            img_inputs = prepare_inputs(processor.process_images([image]).to(model.device), model)
                 
             with torch.inference_mode():
-                img_outputs = model(
-                    input_ids=img_inputs.get("input_ids"),
-                    pixel_values=img_inputs.get("pixel_values"),
-                    attention_mask=img_inputs.get("attention_mask")
-                )
+                img_outputs = model(**img_inputs)
             img_emb = mean_pool(extract_embeddings(img_outputs))
             del img_inputs, img_outputs; 
             torch.cuda.empty_cache()
             gc.collect()
 
-            txt_inputs = processor.process_queries([text]).to(model.device)
-            if "input_ids" in txt_inputs:
-                txt_inputs["input_ids"] = txt_inputs["input_ids"].long()
+            txt_inputs = prepare_inputs(processor.process_queries([text]).to(model.device), model)
                 
             with torch.inference_mode():
-                txt_outputs = model(
-                    input_ids=txt_inputs.get("input_ids"),
-                    pixel_values=txt_inputs.get("pixel_values"),
-                    attention_mask=txt_inputs.get("attention_mask")
-                )
+                txt_outputs = model(**txt_inputs)
             txt_emb = mean_pool(extract_embeddings(txt_outputs))
             del txt_inputs, txt_outputs; 
             torch.cuda.empty_cache()
@@ -220,20 +204,10 @@ def main():
             for i, path in enumerate(image_paths):
                 try:
                     image = Image.open(path).convert("RGB")
-                    inputs = processor.process_images([image]).to(model.device)
-                    
-                    # Force correct data types to prevent CUDA "Int" errors
-                    if "input_ids" in inputs:
-                        inputs["input_ids"] = inputs["input_ids"].long()
-                    if "pixel_values" in inputs:
-                        inputs["pixel_values"] = inputs["pixel_values"].to(model.dtype)
+                    inputs = prepare_inputs(processor.process_images([image]).to(model.device), model)
 
                     with torch.inference_mode():
-                        outputs = model(
-                            input_ids=inputs.get("input_ids"),
-                            pixel_values=inputs.get("pixel_values"),
-                            attention_mask=inputs.get("attention_mask")
-                        )
+                        outputs = model(**inputs)
                     emb = extract_embeddings(outputs)
                     embeddings.append({"path": path, "status": "ok", "embedding": mean_pool(emb).tolist()})
                     del emb, inputs, outputs; 
