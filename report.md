@@ -57,7 +57,9 @@ Structured Clinical Report
 
 ## 5. End-to-End System Integration
 
+```
 ## Rag flow
+```text
 Query X-Ray + Clinical Question
                 ↓
 Image Embedding (CLIP / ColPali)
@@ -71,4 +73,15 @@ Build Context
 MedGemma Generation
                 ↓
 Grounded Clinical Answer
-The system successfully integrates image processing, dual-embedding retrieval, and large multimodal model generation. The modular design ensures that the retrieval backend (CLIP vs ColPali) and the generation backend (MedGemma vs Template) can be hot-swapped dynamically via the Streamlit sidebar, effectively balancing high-end medical AI capabilities with strict local hardware constraints.
+```
+
+## Indexing Phase
+```text
+Knowledge Base Images
+        ↓
+CLIP / ColPali Encoder
+        ↓
+Embedding Vectors
+        ↓
+Saved inside knowledge_base.json
+```
