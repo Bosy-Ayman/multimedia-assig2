@@ -55,7 +55,6 @@ Medical Language Generation
         ↓
 Structured Clinical Report
 
-## 5. End-to-End System Integration
 
 ```
 ## Rag flow
